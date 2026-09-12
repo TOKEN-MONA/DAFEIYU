@@ -1,12 +1,27 @@
+import {
+    costFromUsage,
+    countTokensHeuristic,
+    estimateCost,
+    extractPromptText,
+    isDeepseekModel,
+    isPeakTime,
+    parseModelResponse,
+    rollBalanceLedger,
+    rollEngineLedger,
+    todayKey,
+} from './core.js';
+
+/* global SillyTavern */
+
 // DAFEIYU — DeepSeek 余额小鲸鱼 · 纯前端版（UI 扩展，弹窗粘贴仓库地址即可安装）
 //
 // 本文件职责：
 //   1. fetch 拦截器：截获酒馆后端转发回来的 DeepSeek 响应（SSE 末块 / JSON），
-//      捡回被酒馆丢弃的 usage（prompt/completion/缓存命中 token）——零配置、精确级。
+//      有 usage 时精确计价；旧版本或中转剥离 usage 时解析响应文本并估算。
 //   2. 价格引擎：官方价格表（峰谷 × 缓存命中/未命中/输出分层），算出每轮真实花费。
 //   3. 今日已用账本：按日累计，存 localStorage。
-//   4. 余额（可选增强）：用户在扩展面板填自己的 DeepSeek Key（只存酒馆用户设置，
-//      与正文模型连接相互独立），浏览器直连官方 user/balance（CORS 已验证）。
+//   4. 余额（可选增强）：用户在扩展面板填自己的 DeepSeek Key（本机混淆存储，
+//      与正文模型连接相互独立），浏览器直连官方 user/balance。
 //   5. 官渠检测：正文源 = deepseek → 自动模式；否则挂件变暗、点击手动。
 //   6. 挂件设置抽屉（Extensions 面板）。
 //
@@ -38,75 +53,7 @@
     const _origFetch = (typeof window !== 'undefined' && typeof window.fetch === 'function')
         ? window.fetch.bind(window) : null;
 
-    // ==================== 价格 / 峰谷（移植自原作服务端） ====================
-    const PEAK_HOURS = [[9, 12], [14, 18]];
-    const BASE_PRICE = { hit: [0.05, 0.1], miss: [1.5, 3.0], out: [4.5, 9.0] };
-    const PRO_PRICE = { hit: [0.15, 0.3], miss: [4.5, 9.0], out: [13.5, 27.0] };
-    const PRICING = {
-        'deepseek-v4-flash-vision-exp': BASE_PRICE,
-        'deepseek-v4-flash': BASE_PRICE,
-        'deepseek-v4-pro': PRO_PRICE,
-        'deepseek-chat': BASE_PRICE,
-        'deepseek-reasoner': BASE_PRICE,
-        _default: BASE_PRICE,
-    };
-    function priceFor(model) {
-        const m = String(model || '').toLowerCase();
-        for (const key of Object.keys(PRICING)) {
-            if (key === '_default') continue;
-            if (m.indexOf(key) !== -1) return PRICING[key];
-        }
-        return PRICING._default;
-    }
-    // DeepSeek 家族模型判定：模型名含 "deepseek"（大小写不敏感）。
-    // 用于过滤后台请求：填表/记忆插件在 deepseek 源下把 model 指到别家（中转常见），
-    // 其扣费不走 DeepSeek 账户，按 deepseek 价格表入账只会污染"今日已用"。
-    function isDeepseekModel(m) {
-        return /deepseek/i.test(String(m || ''));
-    }
-    // 2026-08-23（北京时间）起周末全天谷价
-    const WEEKEND_VALLEY_FROM_SEC = Math.floor(Date.UTC(2026, 7, 22, 16, 0, 0) / 1000);
-    function isPeakTime(timeSec) {
-        if (!isFinite(Number(timeSec))) return false;
-        const n = Number(timeSec);
-        const bj = new Date(n * 1000 + 8 * 3600 * 1000);
-        if (n >= WEEKEND_VALLEY_FROM_SEC) {
-            const dow = bj.getUTCDay();
-            if (dow === 0 || dow === 6) return false;
-        }
-        const hour = bj.getUTCHours();
-        for (const [start, end] of PEAK_HOURS) if (hour >= start && hour < end) return true;
-        return false;
-    }
-    function todayKey() {
-        const d = new Date();
-        const p = (n) => String(n).padStart(2, '0');
-        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-    }
-    // 真实 usage → 金额（与原作 computeTodayUsage 同一算法）
-    function costFromUsage(usage, model, timeSec) {
-        const u = usage || {};
-        const hit = Math.max(0, Number(u.prompt_cache_hit_tokens ?? u.promptCacheHitTokens ?? 0) || 0);
-        let miss = Math.max(0, Number(u.prompt_cache_miss_tokens ?? u.promptCacheMissTokens ?? 0) || 0);
-        const out = Math.max(0, Number(u.completion_tokens ?? 0) || 0);
-        const prompt = Math.max(0, Number(u.prompt_tokens ?? 0) || 0);
-        if (hit + miss === 0 && prompt > 0) miss = prompt; // 兼容中转站剥掉缓存字段的情形
-        const p = priceFor(model);
-        const pi = isPeakTime(timeSec) ? 1 : 0;
-        const amount = (hit / 1e6) * p.hit[pi] + (miss / 1e6) * p.miss[pi] + (out / 1e6) * p.out[pi];
-        return { amount, tokens: { hit, miss, out } };
-    }
-    // 兜底估算（usage 被剥离时）：prompt 全按缓存未命中计价
-    function estimateCost(model, promptTokens, outputTokens, timeSec) {
-        const p = priceFor(model);
-        const pi = isPeakTime(timeSec) ? 1 : 0;
-        const inTok = Math.max(0, Number(promptTokens) || 0);
-        const outTok = Math.max(0, Number(outputTokens) || 0);
-        return {
-            amount: (inTok / 1e6) * p.miss[pi] + (outTok / 1e6) * p.out[pi],
-            tokens: { hit: 0, miss: inTok, out: outTok },
-        };
-    }
+    // Pricing, peak-hour, response parsing, and ledger transitions live in core.js.
 
     // ==================== localStorage ====================
     function readLS(key, fallback) {
@@ -156,30 +103,20 @@
         if (led && typeof led === 'object' && led.date === todayKey()) return led;
         return freshEngineLedger();
     }
-    function addEngineUsage(cost, estimated) {
-        const t = todayKey();
-        // 直接读原始存储（不经 getEngineLedger 的"跨天清零"视图），否则昨天的历史永远归不了档
-        const raw = readLS(K_ENGINE, null);
-        let led;
-        if (raw && typeof raw === 'object' && typeof raw.date === 'string' && raw.date !== t) {
-            // 跨天：把昨天的 todayUsage 归档进 history，再滚动新账本（对照 recordBalanceDelta 的写法）
-            const hist = (raw.history && typeof raw.history === 'object') ? raw.history : {};
-            if (typeof raw.todayUsage === 'number') hist[raw.date] = raw.todayUsage;
-            led = { date: t, todayUsage: 0, todayTokens: 0, todayEstimated: 0, history: hist };
-        } else if (raw && typeof raw === 'object' && raw.date === t) {
-            led = raw;
-        } else {
-            led = freshEngineLedger();
+    async function withStorageLock(name, operation) {
+        // Web Locks is available in secure contexts (including localhost). It serializes the
+        // read-modify-write across tabs; old/non-secure browsers keep the previous best-effort path.
+        if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+            return navigator.locks.request(name, { mode: 'exclusive' }, operation);
         }
-        led.history = led.history || {};
-        led.todayUsage = Math.round(((led.todayUsage || 0) + cost.amount) * 1e6) / 1e6;
-        led.todayTokens = (led.todayTokens || 0) + cost.tokens.hit + cost.tokens.miss + cost.tokens.out;
-        if (estimated) led.todayEstimated = (led.todayEstimated || 0) + 1;
-        led.history[t] = led.todayUsage;
-        const keys = Object.keys(led.history).sort();
-        while (keys.length > 30) delete led.history[keys.shift()];
-        writeLS(K_ENGINE, led);
-        return led;
+        return operation();
+    }
+    async function addEngineUsage(cost, estimated) {
+        return withStorageLock(K_ENGINE, () => {
+            const led = rollEngineLedger(readLS(K_ENGINE, null), cost, estimated, todayKey());
+            writeLS(K_ENGINE, led);
+            return led;
+        });
     }
     // —— 余额差值账本（ledger 模式，算法移植自原作）——
     function getBalanceLedger() {
@@ -187,38 +124,24 @@
         if (led && typeof led.date === 'string') return led;
         return { date: todayKey(), lastBalance: null, lastCurrency: '', todayUsage: 0, history: {} };
     }
-    function recordBalanceDelta(balance, currency) {
-        const t = todayKey();
-        let led = getBalanceLedger();
-        const cur = String(currency || '');
-        const currencyChanged = typeof led.lastCurrency === 'string' && led.lastCurrency !== '' && cur !== '' && led.lastCurrency !== cur;
-        if (led.date !== t) {
-            if (led.date && typeof led.todayUsage === 'number') {
-                led.history = led.history || {};
-                led.history[led.date] = led.todayUsage;
-            }
-            led = { date: t, lastBalance: balance, lastCurrency: cur, todayUsage: 0, history: led.history || {} };
-        } else if (currencyChanged) {
-            led.lastBalance = balance;
-            led.lastCurrency = cur;
-        } else {
-            const prev = typeof led.lastBalance === 'number' ? led.lastBalance : balance;
-            if (typeof prev === 'number' && typeof balance === 'number' && balance < prev) {
-                led.todayUsage = (typeof led.todayUsage === 'number' ? led.todayUsage : 0) + (prev - balance);
-            }
-            led.lastBalance = balance;
-            led.lastCurrency = cur;
-        }
-        const keys = Object.keys(led.history || {}).sort();
-        while (keys.length > 30) delete led.history[keys.shift()];
-        writeLS(K_BALANCE, led);
-        return led;
+    async function recordBalanceDelta(balance, currency) {
+        return withStorageLock(K_BALANCE, () => {
+            const led = rollBalanceLedger(
+                readLS(K_BALANCE, null),
+                balance,
+                currency,
+                getEngineLedger().todayUsage,
+                todayKey(),
+            );
+            writeLS(K_BALANCE, led);
+            return led;
+        });
     }
 
     // ==================== 运行时桥（index.js ↔ widget.js） ====================
     const listeners = { turn: [], state: [] };
     const runtime = window.__dafyRuntime = {
-        version: '0.5.0',
+        version: '0.6.0',
         state: {
             keySource: 'none',   // 'tavern' | 'extension' | 'none'
             keyHint: '',         // 读不到密钥时的 actionable 提示
@@ -263,7 +186,7 @@
     }
 
     // 跨标签页：其他标签页写入 dafy-* 键时广播状态，widget/面板据此刷新显示。
-    // （账本写入本就是"每次写前重读"的同步 read-modify-write，跨页合计不会丢；这里只补显示同步。）
+    // Web Locks 串行化账本写入；storage 事件负责补齐各标签页显示同步。
     window.addEventListener('storage', (e) => {
         try {
             if (e.key && e.key.indexOf('dafy-') === 0) runtime.emitState();
@@ -483,6 +406,12 @@
         return (u.origin + u.pathname).replace(/\/+$/, '');
     }
     const OFFICIAL_BASE = 'https://api.deepseek.com';
+    function fetchWithAbort(url, options, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        return _origFetch(url, { ...options, signal: controller.signal })
+            .finally(() => clearTimeout(timer));
+    }
     async function fetchBalanceDirect(key, apiBase) {
         const base = normalizeBase(apiBase);
         if (!base) return { ok: false, code: 'BASE', error: 'API 地址无效：必须是以 https:// 开头的合法地址' };
@@ -505,10 +434,9 @@
         // 用求值期捕获的原始 fetch 发 Bearer：后装脚本的 window.fetch 包装器看不到这行请求。
         if (!_origFetch) return { ok: false, code: 'NOFETCH', error: '余额查询失败: 浏览器 fetch 不可用' };
         try {
-            const res = await _origFetch(base + '/user/balance', {
+            const res = await fetchWithAbort(base + '/user/balance', {
                 headers: { Authorization: 'Bearer ' + key },
-                signal: AbortSignal.timeout(20000),
-            });
+            }, 20000);
             if (!res.ok) return { ok: false, code: 'HTTP' + res.status, error: '余额接口 HTTP ' + res.status };
             const data = await res.json();
             const info = pickBalanceInfo(data && data.balance_infos);
@@ -547,7 +475,7 @@
             }
             balanceCache = { at: Date.now(), payload };
             if (mode === 'ledger') {
-                const led = recordBalanceDelta(payload.totalBalance, payload.currency);
+                await recordBalanceDelta(payload.totalBalance, payload.currency);
                 return { ...base, ...payload, todayUsage: ledgerTodayOrEngine(mode) };
             }
             return { ...base, ...payload, todayUsage: getEngineLedger().todayUsage };
@@ -555,7 +483,7 @@
         return balanceInFlight;
     }
 
-    // ==================== fetch 拦截器：截获真实 usage ====================
+    // ==================== fetch 拦截器：截获真实 usage / 解析估算文本 ====================
     // 酒馆后端把 DeepSeek 的响应原样转发给浏览器（forwardFetchResponse = 逐字节 pipe），
     // 但酒馆自己的解析器只取正文，把 usage 丢了。这里给 fetch 披一层外衣，
     // clone 一份响应自己读——流式读 SSE 末块的 usage，非流式读 JSON 的 usage。
@@ -570,6 +498,7 @@
     // 否则每轮对话后会弹出第二个"≈¥0.00"估算泡泡（prompt 恒 0 + 无流事件文本）。
     let generationActive = false;
     let lastGenerationQuiet = false;
+    let generationGatingReady = false;
 
     async function resolveTokenCount(text) {
         if (!text) return 0;
@@ -578,34 +507,8 @@
                 const n = await ctxRef.getTokenCountAsync(text);
                 if (typeof n === 'number' && isFinite(n) && n > 0) return Math.round(n);
             }
-        } catch (err) { /* 走启发式 */ }
-        // 启发式：DeepSeek 分词下 CJK ≈0.6 token/字，其余 ≈4 字符/token
-        let cjk = 0, other = 0;
-        const s = String(text);
-        for (let i = 0; i < s.length; i++) {
-            const code = s.charCodeAt(i);
-            if (code >= 0x2E80 && code <= 0xFFEF) cjk++;
-            else other++;
-        }
-        return Math.ceil(cjk * 0.6 + other / 4);
-    }
-
-    // 从被拦截的请求体提取 prompt 全文（messages 数组，含 system/世界书——比坏掉的
-    // ctx.getTokenCount()（无参调用恒返回 0）准确得多，且修掉"估算 prompt 恒 0"的问题）
-    function extractPromptText(messages) {
-        if (!Array.isArray(messages)) return '';
-        let out = '';
-        for (const m of messages) {
-            if (!m) continue;
-            const c = m.content;
-            if (typeof c === 'string') out += c + '\n';
-            else if (Array.isArray(c)) {
-                for (const part of c) {
-                    if (part && typeof part.text === 'string') out += part.text + '\n';
-                }
-            }
-        }
-        return out;
+        } catch (err) { /* fall back to the shared heuristic */ }
+        return countTokensHeuristic(text);
     }
 
     function beginTurn(response, model, promptText) {
@@ -616,7 +519,7 @@
         }
         const turn = {
             model: model || '',
-            quiet: !generationActive || lastGenerationQuiet, // 主对话窗口之外 / quiet prompt → 后台请求
+            quiet: generationGatingReady ? !generationActive || lastGenerationQuiet : false,
             promptTokens: 0,
             promptCountPromise: null,
             outText: '',
@@ -636,9 +539,9 @@
         for (const entry of activeTurns) last = entry; // Map 按插入序迭代，取最新
         return last; // [response, turn] 或 null
     }
-    function settleTurn(response, turnResult, silent) {
+    async function settleTurn(response, turnResult, silent) {
         activeTurns.delete(response);
-        const led = addEngineUsage(turnResult, !!turnResult.estimated);
+        const led = await addEngineUsage(turnResult, !!turnResult.estimated);
         if (silent) {
             // 后台请求（标题生成/填表记忆插件等）真实消耗：静默入账，不弹泡、不占"已截获"计数
             runtime.emitState();
@@ -646,7 +549,7 @@
         }
         emitTurn({ ...turnResult, todayUsage: led.todayUsage });
     }
-    function handleUsage(response, usage, model) {
+    async function handleUsage(response, usage, model) {
         const turn = activeTurns.get(response);
         if (!turn) return; // 已结算（真实或估算）或已丢弃：迟到 usage 不再入账
         // 后台请求若实际服务的不是 DeepSeek 家族模型（响应 model 优先于请求 model），
@@ -658,7 +561,7 @@
         }
         const t = Math.floor(Date.now() / 1000);
         const cost = costFromUsage(usage, model, t);
-        settleTurn(response, { ...cost, usage, model: model || '', estimated: false }, turn.quiet);
+        await settleTurn(response, { ...cost, usage, model: model || '', estimated: false }, turn.quiet);
     }
     // 估算兜底：usage 被中转剥掉时，用请求体 prompt / 流式输出文本估算并真实入账。
     // 只结算"主对话" turn：quiet turn 直接静默丢弃；clone 仍在读取的先跳过（usage 可能马上到），
@@ -683,14 +586,14 @@
             const outTokens = await resolveTokenCount(turn.outText);
             if (!activeTurns.has(response)) continue; // 计数期间已被真实 usage 结算
             const cost = estimateCost(turn.model, promptTokens, outTokens, Math.floor(Date.now() / 1000));
-            settleTurn(response, { ...cost, usage: null, model: turn.model, estimated: true });
+            await settleTurn(response, { ...cost, usage: null, model: turn.model, estimated: true });
         }
     }
 
     // 统一文本捕获：把 clone 的响应读成全文，再自动识别 JSON（非流式）或 SSE（流式）。
     // 注意：酒馆后端 forwardFetchResponse 只 pipe 字节流、不设置 Content-Type（util.js:709），
     // 所以绝不能用响应头判断形态——必须看内容本体。
-    async function readBodyClone(clone, onUsage) {
+    async function readBodyClone(clone, onBody) {
         try {
             const reader = clone.body.getReader();
             const dec = _TextDecoder ? new _TextDecoder() : new TextDecoder();
@@ -700,39 +603,15 @@
                 if (done) break;
                 text += dec.decode(value, { stream: true });
             }
-            const t = text.trim();
-            if (!t) return;
-            // ① 非流式：整体是一个 JSON 对象
-            if (t.startsWith('{') || t.startsWith('[')) {
-                try {
-                    const obj = JSON.parse(t);
-                    if (obj && obj.usage && typeof obj.usage === 'object') onUsage(obj.usage, obj.model || '');
-                } catch (err) { /* 坏 JSON，忽略 */ }
-                return;
-            }
-            // ② 流式：逐行扫 data: 载荷，取最后一个带 usage 的块（DeepSeek 在末块携带）
-            let lastUsage = null;
-            let lastModel = '';
-            const lines = t.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-                const l = lines[i].trim();
-                if (!l.startsWith('data:')) continue;
-                const ds = l.slice(5).trim();
-                if (!ds || ds === '[DONE]') continue;
-                try {
-                    const o = JSON.parse(ds);
-                    if (o && o.usage && typeof o.usage === 'object') {
-                        lastUsage = o.usage;
-                        lastModel = o.model || lastModel;
-                    }
-                } catch (err) { /* 跳过坏行 */ }
-            }
-            if (lastUsage) onUsage(lastUsage, lastModel);
-        } catch (err) { /* 流被提前销毁等，忽略 */ }
+            const parsed = parseModelResponse(text);
+            if (parsed.usage || parsed.outputText || parsed.model) onBody(parsed);
+        } catch (err) {
+            console.warn('[DAFEIYU] response body read failed', err);
+        }
     }
 
-    // ① 先解析请求体：识别 deepseek 源，并注入 stream_options.include_usage——
-    //    DeepSeek 流式响应默认不带 usage，必须显式要求；不注入则捕获成败全看酒馆自身配置
+    // ① 先解析请求体：识别 deepseek 源，并尽力注入 stream_options.include_usage。
+    //    部分酒馆后端会重建上游请求并丢弃该字段；因此响应体解析与估算才是兼容基线。
     if (_origFetch) window.fetch = async function dafieyuFetch(input, init) {
         let url = '';
         try {
@@ -768,7 +647,7 @@
             }
         }
 
-        // ② 注入了 include_usage 则替换请求体后再发出（拦截层绝不破坏其余参数）
+        // ② 仅在成功注入 include_usage 时替换请求体（拦截层绝不破坏其余参数）
         let fetchInput = input;
         let fetchInit = init;
         if (bodyTouched) {
@@ -791,10 +670,19 @@
                 turn.reading = true;
                 // 不看 Content-Type（酒馆不转发该头），统一按内容本体解析。
                 // 读完后复位 reading——估算兜底只碰"读完了仍没 usage"的 turn
-                readBodyClone(response.clone(), (usage, m) => handleUsage(response, usage, m || model))
+                readBodyClone(response.clone(), (parsed) => {
+                    const turn = activeTurns.get(response);
+                    if (turn && parsed.outputText) turn.outText = parsed.outputText;
+                    if (parsed.usage) void handleUsage(response, parsed.usage, parsed.model || model);
+                })
                     .then(() => {
                         const tn = activeTurns.get(response);
-                        if (tn) tn.reading = false;
+                        if (tn) {
+                            tn.reading = false;
+                            // Old Tavern builds may not expose GENERATION_ENDED. Once the response
+                            // body is fully parsed, drive the estimate fallback from this path.
+                            if (!generationGatingReady) scheduleFallbackFinalize();
+                        }
                     });
             }
             return response;
@@ -859,6 +747,7 @@
             if (t.SETTINGS_UPDATED) eventSource.on(t.SETTINGS_UPDATED, refreshAuto);
             if (t.CHAT_COMPLETION_SETTINGS_READY) eventSource.on(t.CHAT_COMPLETION_SETTINGS_READY, refreshAuto);
             if (t.CONNECTION_PROFILE_LOADED) eventSource.on(t.CONNECTION_PROFILE_LOADED, refreshAuto);
+            generationGatingReady = true;
         } catch (err) {
             console.warn('[DAFEIYU] event bridge unavailable', err);
         }
@@ -871,7 +760,7 @@
         // 单轮花费常低于一分钱，两位小数会显示 ¥0.00——小额用 4 位
         return '¥ ' + (v >= 0.01 || v === 0 ? v.toFixed(2) : v.toFixed(4));
     }
-    function buildSettings(c) {
+    function buildSettings() {
         const host = document.getElementById('extensions_settings2');
         if (!host || host.querySelector('#dafy-settings')) return false;
         const drawer = document.createElement('div');
@@ -896,7 +785,7 @@
             '<button id="dafy-clear" class="menu_button" style="flex:0">清除 Key</button>' +
             '<span id="dafy-status" style="align-self:center;font-size:12px;opacity:.8"></span>' +
             '</div></div>' +
-            '<small style="opacity:.6;display:block;margin-top:6px">这里的 Key 是你自己的 DeepSeek Key（与酒馆正文模型连接相互独立），以混淆形式只存在本机浏览器里，不进酒馆设置文件、不随备份/导出走；余额请求经独立线程发出，页面上的其他脚本无法截获。allowKeysExposure 无需开启。消耗统计完全不需要 Key。</small>' +
+            '<small style="opacity:.6;display:block;margin-top:6px">这里的 Key 是你自己的 DeepSeek Key（与酒馆正文模型连接相互独立），以混淆形式只存在本机浏览器里，不进酒馆设置文件、不随备份/导出走；余额请求优先经独立线程发出；纯前端无法防御更早加载的恶意脚本。allowKeysExposure 无需开启。消耗统计完全不需要 Key。</small>' +
             '</div>';
         host.appendChild(drawer);
 
@@ -912,7 +801,7 @@
         const refreshSummary = () => {
             const snap = runtime.getLedgerSnapshot();
             const src = keySourceText();
-            const modeText = snap.usageMode === 'ledger' ? '小鲸鱼记账（余额差值）' : '实时·精确（usage 截获）';
+            const modeText = snap.usageMode === 'ledger' ? '小鲸鱼记账（余额差值）' : '实时·精确 / 估算';
             summary.textContent = `今日已用 ${fmtMoney(snap.todayUsage)} · 今日 token ${snap.todayTokens} · 已截获 ${runtime.state.captureCount} 轮（今日估算 ${snap.todayEstimated}） · 用量模式 ${modeText} · 密钥 ${src}`;
             keyHintEl.textContent = runtime.state.keyHint || '';
             keyHintEl.style.display = runtime.state.keyHint ? '' : 'none';
@@ -969,7 +858,7 @@
     // ==================== 启动 ====================
     function boot() {
         const c = (typeof SillyTavern !== 'undefined') ? SillyTavern.getContext() : null;
-        const ready = c && typeof c.eventSource !== 'undefined';
+        const ready = !!c;
         const bodyReady = document.body != null;
         if (!ready || !bodyReady) {
             setTimeout(boot, 500);

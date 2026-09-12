@@ -5,13 +5,11 @@ window.__dafyWidget = true
 
 var MIN_SCALE = 0.6
 var MAX_SCALE = 2.5
-var STEP = 0.1
 var CLICK_SQ = 9
 var REFRESH_MS = 60000
 var CHANGE_MS = 900
 var ANIM_MS = 700
 var BUBBLE_MS = 5000
-var FETCH_TIMEOUT_MS = 25000
 // DAFEIYU 纯前端版：资源随扩展目录走（本文件由 index.js 以模块相对路径动态加载，
 // import.meta.url 即本文件在 /scripts/extensions/third-party/DAFEIYU/ 下的真实地址）。
 var ASSET_BASE = new URL('assets/', import.meta.url).href
@@ -27,51 +25,51 @@ function saveSizeConfig(cfg) {
 
 
 var css = [
-  '.dshwv-root{position:fixed;right:0;bottom:0;--dshw-scale:1;--dshw-base:clamp(122px,calc(min(250px,min(100vw,100vh) * 0.28) * var(--dshw-scale)),625px);--dshw-safe-b:env(safe-area-inset-bottom,0px);--dshw-safe-r:env(safe-area-inset-right,0px);width:var(--dshw-base);height:var(--dshw-base);pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;z-index:9999;font-family:inherit;transition:left .16s ease,top .16s ease,transform .3s ease,opacity .3s ease}',
-  '.dshwv-root.dshwv-dim{opacity:.45}',
-  '.dshwv-root.dshwv-dim:hover{opacity:.9}',
-  '.dshwv-root.dshwv-left{transform:scaleX(-1)}',
-  '.dshwv-root.dshwv-dragging{cursor:grabbing;transition:none}',
-  '.dshwv-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 100%;transition:transform .22s cubic-bezier(.34,1.56,.64,1)}',
-  '.dshwv-img{position:absolute;right:0;bottom:0;width:59.45%;height:59.45%;display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}',
-  '.dshwv-bubble{position:absolute;left:0;top:0;width:100%;aspect-ratio:1026/700;pointer-events:none;z-index:1;--dshw-u:calc(var(--dshw-base) / 1026)}',
-  '.dshwv-bubble svg{display:block;width:100%;height:100%;pointer-events:none}',
-  '.dshwv-bubble svg path,.dshwv-bubble svg ellipse{pointer-events:none;cursor:pointer}',
-  '.dshwv-bubble.dshwv-bubble-open svg path,.dshwv-bubble.dshwv-bubble-open svg ellipse{pointer-events:visiblePainted}',
-  '.dshwv-bubble .dshwv-bshape,.dshwv-bubble .dshwv-b1,.dshwv-bubble .dshwv-b2{opacity:0;transform:scale(.7);transform-box:fill-box;transform-origin:50% 50%;transition:opacity .2s ease,transform .2s ease}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-bshape,.dshwv-bubble.dshwv-bubble-open .dshwv-b1,.dshwv-bubble.dshwv-bubble-open .dshwv-b2{opacity:1;transform:none}',
-  '.dshwv-gif{position:absolute;left:44.25%;top:38%;transform:translate(-50%,-50%);max-width:calc(var(--dshw-u) * 560);max-height:calc(var(--dshw-u) * 400);display:none;opacity:0;transition:opacity .2s ease;pointer-events:none;-webkit-user-drag:none;user-select:none;object-fit:contain}',
-  '.dshwv-root.dshwv-left .dshwv-gif{transform:translate(-50%,-50%) scaleX(-1)}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-gif{opacity:1}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-b2{transition-delay:0s}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-b1{transition-delay:.13s}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-bshape{transition-delay:.26s}',
-  '.dshwv-bubble .dshwv-bshape{transition-delay:.1s}',
-  '.dshwv-bubble .dshwv-b1{transition-delay:.2s}',
-  '.dshwv-bubble .dshwv-b2{transition-delay:.3s}',
-  '.dshwv-text{position:absolute;left:44.25%;top:38%;transform:translate(-50%,-50%);text-align:center;color:#536ba9;line-height:1.15;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .16s ease,transform .3s ease}',
-  '.dshwv-bubble.dshwv-bubble-open .dshwv-text{opacity:1;transition:opacity .16s ease .36s,transform .3s ease}',
-  '.dshwv-root.dshwv-left .dshwv-text{transform:translate(-50%,-50%) scaleX(-1)}',
-  '.dshwv-label{font-size:calc(var(--dshw-u) * 66);font-weight:600;letter-spacing:.06em}',
-  '.dshwv-amount{font-size:calc(var(--dshw-u) * 128);font-weight:800;line-height:1.05}',
-  '.dshwv-period{font-size:calc(var(--dshw-u) * 104);font-weight:800;line-height:1.05}',
-  '.dshwv-wrap{white-space:normal;max-width:calc(var(--dshw-u) * 560);line-height:1.2}',
-  '.dshwv-hint{font-size:calc(var(--dshw-u) * 56);color:#9fb0d9;letter-spacing:.02em;margin-top:calc(var(--dshw-u) * 9);min-height:calc(var(--dshw-u) * 64);line-height:1.15}',
-  '.dshwv-menu-btn{position:absolute;top:calc(40.55% + 4px);right:4px;width:26px;height:26px;border:none;border-radius:6px;background:rgba(32,49,112,.85);cursor:pointer;pointer-events:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0;z-index:2;opacity:0;transition:opacity .15s ease}',
-  '.dshwv-menu-btn.dshwv-menu-btn-visible{opacity:1}',
-  '.dshwv-menu-btn span{display:block;width:14px;height:2px;background:#fff;border-radius:1px}',
-  '.dshwv-menu-btn:hover{background:#203170}',
-  '.dshwv-menu{position:fixed;min-width:196px;background:rgba(255,255,255,.92);border:1px solid rgba(32,49,112,.35);border-radius:10px;padding:10px 12px;opacity:0;transform:scale(.92) translateY(-4px);transform-origin:top right;transition:opacity .18s ease,transform .2s cubic-bezier(.34,1.56,.64,1);pointer-events:none;z-index:10000;box-shadow:0 6px 18px rgba(0,0,0,.18);color-scheme:light}',
-  '.dshwv-menu.dshwv-menu-open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}',
-  '.dshwv-menu-row{display:flex;align-items:center;gap:8px;margin:5px 0;color:#203170;font-size:12px;white-space:nowrap}',
-  '.dshwv-range{flex:1;min-width:0;accent-color:#203170}',
-  '.dshwv-number{width:44px;border:1px solid rgba(32,49,112,.4);border-radius:6px;padding:2px 4px;font-size:12px;color:#203170;background:#fff;box-sizing:border-box}',
-  '.dshwv-number:disabled{opacity:.4;background:rgba(32,49,112,.06);cursor:not-allowed}',
-  '.dshwv-sound{flex:1;border:1px solid rgba(32,49,112,.4);border-radius:6px;background:rgba(32,49,112,.08);color:#203170;font-size:12px;padding:3px 0;cursor:pointer}',
-  '.dshwv-sound:hover{background:rgba(32,49,112,.16)}',
-  '.dshwv-check{width:16px;height:16px;accent-color:#203170;cursor:pointer;flex:0 0 auto}',
-  '.dshwv-menu-sep{height:1px;background:rgba(32,49,112,.25);margin:6px 0}',
-  '.dshwv-volpct{width:44px;text-align:right;color:#203170;font-size:12px}'
+  '.dafyv-root{position:fixed;right:0;bottom:0;--dafy-scale:1;--dafy-base:clamp(122px,calc(min(250px,min(100vw,100vh) * 0.28) * var(--dafy-scale)),625px);--dafy-safe-b:env(safe-area-inset-bottom,0px);--dafy-safe-r:env(safe-area-inset-right,0px);width:var(--dafy-base);height:var(--dafy-base);pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;z-index:9999;font-family:inherit;transition:left .16s ease,top .16s ease,transform .3s ease,opacity .3s ease}',
+  '.dafyv-root.dafyv-dim{opacity:.45}',
+  '.dafyv-root.dafyv-dim:hover{opacity:.9}',
+  '.dafyv-root.dafyv-left{transform:scaleX(-1)}',
+  '.dafyv-root.dafyv-dragging{cursor:grabbing;transition:none}',
+  '.dafyv-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 100%;transition:transform .22s cubic-bezier(.34,1.56,.64,1)}',
+  '.dafyv-img{position:absolute;right:0;bottom:0;width:59.45%;height:59.45%;display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}',
+  '.dafyv-bubble{position:absolute;left:0;top:0;width:100%;aspect-ratio:1026/700;pointer-events:none;z-index:1;--dafy-u:calc(var(--dafy-base) / 1026)}',
+  '.dafyv-bubble svg{display:block;width:100%;height:100%;pointer-events:none}',
+  '.dafyv-bubble svg path,.dafyv-bubble svg ellipse{pointer-events:none;cursor:pointer}',
+  '.dafyv-bubble.dafyv-bubble-open svg path,.dafyv-bubble.dafyv-bubble-open svg ellipse{pointer-events:visiblePainted}',
+  '.dafyv-bubble .dafyv-bshape,.dafyv-bubble .dafyv-b1,.dafyv-bubble .dafyv-b2{opacity:0;transform:scale(.7);transform-box:fill-box;transform-origin:50% 50%;transition:opacity .2s ease,transform .2s ease}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-bshape,.dafyv-bubble.dafyv-bubble-open .dafyv-b1,.dafyv-bubble.dafyv-bubble-open .dafyv-b2{opacity:1;transform:none}',
+  '.dafyv-gif{position:absolute;left:44.25%;top:38%;transform:translate(-50%,-50%);max-width:calc(var(--dafy-u) * 560);max-height:calc(var(--dafy-u) * 400);display:none;opacity:0;transition:opacity .2s ease;pointer-events:none;-webkit-user-drag:none;user-select:none;object-fit:contain}',
+  '.dafyv-root.dafyv-left .dafyv-gif{transform:translate(-50%,-50%) scaleX(-1)}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-gif{opacity:1}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-b2{transition-delay:0s}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-b1{transition-delay:.13s}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-bshape{transition-delay:.26s}',
+  '.dafyv-bubble .dafyv-bshape{transition-delay:.1s}',
+  '.dafyv-bubble .dafyv-b1{transition-delay:.2s}',
+  '.dafyv-bubble .dafyv-b2{transition-delay:.3s}',
+  '.dafyv-text{position:absolute;left:44.25%;top:38%;transform:translate(-50%,-50%);text-align:center;color:#536ba9;line-height:1.15;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .16s ease,transform .3s ease}',
+  '.dafyv-bubble.dafyv-bubble-open .dafyv-text{opacity:1;transition:opacity .16s ease .36s,transform .3s ease}',
+  '.dafyv-root.dafyv-left .dafyv-text{transform:translate(-50%,-50%) scaleX(-1)}',
+  '.dafyv-label{font-size:calc(var(--dafy-u) * 66);font-weight:600;letter-spacing:.06em}',
+  '.dafyv-amount{font-size:calc(var(--dafy-u) * 128);font-weight:800;line-height:1.05}',
+  '.dafyv-period{font-size:calc(var(--dafy-u) * 104);font-weight:800;line-height:1.05}',
+  '.dafyv-wrap{white-space:normal;max-width:calc(var(--dafy-u) * 560);line-height:1.2}',
+  '.dafyv-hint{font-size:calc(var(--dafy-u) * 56);color:#9fb0d9;letter-spacing:.02em;margin-top:calc(var(--dafy-u) * 9);min-height:calc(var(--dafy-u) * 64);line-height:1.15}',
+  '.dafyv-menu-btn{position:absolute;top:calc(40.55% + 4px);right:4px;width:26px;height:26px;border:none;border-radius:6px;background:rgba(32,49,112,.85);cursor:pointer;pointer-events:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0;z-index:2;opacity:0;transition:opacity .15s ease}',
+  '.dafyv-menu-btn.dafyv-menu-btn-visible{opacity:1}',
+  '.dafyv-menu-btn span{display:block;width:14px;height:2px;background:#fff;border-radius:1px}',
+  '.dafyv-menu-btn:hover{background:#203170}',
+  '.dafyv-menu{position:fixed;min-width:196px;background:rgba(255,255,255,.92);border:1px solid rgba(32,49,112,.35);border-radius:10px;padding:10px 12px;opacity:0;transform:scale(.92) translateY(-4px);transform-origin:top right;transition:opacity .18s ease,transform .2s cubic-bezier(.34,1.56,.64,1);pointer-events:none;z-index:10000;box-shadow:0 6px 18px rgba(0,0,0,.18);color-scheme:light}',
+  '.dafyv-menu.dafyv-menu-open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}',
+  '.dafyv-menu-row{display:flex;align-items:center;gap:8px;margin:5px 0;color:#203170;font-size:12px;white-space:nowrap}',
+  '.dafyv-range{flex:1;min-width:0;accent-color:#203170}',
+  '.dafyv-number{width:44px;border:1px solid rgba(32,49,112,.4);border-radius:6px;padding:2px 4px;font-size:12px;color:#203170;background:#fff;box-sizing:border-box}',
+  '.dafyv-number:disabled{opacity:.4;background:rgba(32,49,112,.06);cursor:not-allowed}',
+  '.dafyv-sound{flex:1;border:1px solid rgba(32,49,112,.4);border-radius:6px;background:rgba(32,49,112,.08);color:#203170;font-size:12px;padding:3px 0;cursor:pointer}',
+  '.dafyv-sound:hover{background:rgba(32,49,112,.16)}',
+  '.dafyv-check{width:16px;height:16px;accent-color:#203170;cursor:pointer;flex:0 0 auto}',
+  '.dafyv-menu-sep{height:1px;background:rgba(32,49,112,.25);margin:6px 0}',
+  '.dafyv-volpct{width:44px;text-align:right;color:#203170;font-size:12px}'
 ].join('\n')
 
 var styleEl = document.createElement('style')
@@ -79,23 +77,23 @@ styleEl.textContent = css
 document.head.appendChild(styleEl)
 
 var root = document.createElement('div')
-root.className = 'dshwv-root'
+root.className = 'dafyv-root'
 
 var img = document.createElement('img')
-img.className = 'dshwv-img'
+img.className = 'dafyv-img'
 img.src = IMG_URL
 img.alt = 'DeepSeek 余额'
 img.draggable = false
 
 var menuBtn = document.createElement('button')
 menuBtn.type = 'button'
-menuBtn.className = 'dshwv-menu-btn'
+menuBtn.className = 'dafyv-menu-btn'
 menuBtn.title = '菜单'
 menuBtn.innerHTML = '<span></span><span></span><span></span>'
 menuBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu() })
 
 var menuBox = document.createElement('div')
-menuBox.className = 'dshwv-menu'
+menuBox.className = 'dafyv-menu'
 function menuLabel(text) {
   var s = document.createElement('span')
   s.textContent = text
@@ -103,7 +101,7 @@ function menuLabel(text) {
 }
 function menuRow() {
   var r = document.createElement('div')
-  r.className = 'dshwv-menu-row'
+  r.className = 'dafyv-menu-row'
   return r
 }
 var scaleInput = document.createElement('input')
@@ -111,14 +109,14 @@ scaleInput.type = 'range'
 scaleInput.min = String(MIN_SCALE)
 scaleInput.max = String(MAX_SCALE)
 scaleInput.step = '0.1'
-scaleInput.className = 'dshwv-range'
+scaleInput.className = 'dafyv-range'
 scaleInput.value = '1.5'
 var scaleNumber = document.createElement('input')
 scaleNumber.type = 'number'
 scaleNumber.min = '1'
 scaleNumber.max = '20'
 scaleNumber.step = '1'
-scaleNumber.className = 'dshwv-number'
+scaleNumber.className = 'dafyv-number'
 scaleNumber.value = '10'
 scaleInput.addEventListener('pointerdown', function () { root.style.transition = 'none' })
 scaleInput.addEventListener('input', function () { setScale(scaleInput.value) })
@@ -137,7 +135,7 @@ scaleNumber.addEventListener('change', function () {
   root.style.transition = ''
 })
 var soundSelect = document.createElement('select')
-soundSelect.className = 'dshwv-sound'
+soundSelect.className = 'dafyv-sound'
 function soundOpt(value, label) {
   var o = document.createElement('option')
   o.value = value
@@ -148,25 +146,25 @@ soundSelect.appendChild(soundOpt('duck', '小黄鸭'))
 soundSelect.appendChild(soundOpt('fx1', '音效1'))
 soundSelect.addEventListener('change', function () { setSoundSet(soundSelect.value) })
 var usageSelect = document.createElement('select')
-usageSelect.className = 'dshwv-sound'
+usageSelect.className = 'dafyv-sound'
 usageSelect.appendChild(soundOpt('ledger', '小鲸鱼记账 (默认)'))
-usageSelect.appendChild(soundOpt('engine', '实时·精确'))
+usageSelect.appendChild(soundOpt('engine', '实时·精确 / 估算'))
 usageSelect.addEventListener('change', function () { setUsageMode(usageSelect.value) })
 var peakSelect = document.createElement('select')
-peakSelect.className = 'dshwv-sound'
+peakSelect.className = 'dafyv-sound'
 peakSelect.appendChild(soundOpt('default', '默认'))
 peakSelect.appendChild(soundOpt('liangwen', '梁文峰谷'))
 peakSelect.appendChild(soundOpt('qiangqiang', '!?强强?!'))
 peakSelect.addEventListener('change', function () { setPeakMode(peakSelect.value) })
 var bubbleToggle = document.createElement('input')
 bubbleToggle.type = 'checkbox'
-bubbleToggle.className = 'dshwv-check'
+bubbleToggle.className = 'dafyv-check'
 bubbleToggle.checked = true
 bubbleToggle.title = '开启/关闭思考气泡'
 bubbleToggle.addEventListener('change', function () { setBubbleOn(bubbleToggle.checked) })
 var turnCostToggle = document.createElement('input')
 turnCostToggle.type = 'checkbox'
-turnCostToggle.className = 'dshwv-check'
+turnCostToggle.className = 'dafyv-check'
 turnCostToggle.checked = true
 turnCostToggle.title = '每轮对话结束后自动显示本轮消耗金额'
 turnCostToggle.addEventListener('change', function () { setTurnCostOn(turnCostToggle.checked) })
@@ -174,7 +172,7 @@ var turnCostCloseInput = document.createElement('input')
 turnCostCloseInput.type = 'number'
 turnCostCloseInput.min = '0'
 turnCostCloseInput.step = '1'
-turnCostCloseInput.className = 'dshwv-number'
+turnCostCloseInput.className = 'dafyv-number'
 turnCostCloseInput.value = '5'
 turnCostCloseInput.disabled = false // 跟随「每轮消耗提示」开关
 turnCostCloseInput.title = '填 0 表示不自动关闭，需手动点击关闭'
@@ -182,7 +180,7 @@ turnCostCloseInput.addEventListener('input', function () { setTurnCostClose(turn
 turnCostCloseInput.addEventListener('change', function () { setTurnCostClose(turnCostCloseInput.value) })
 var scrollGapToggle = document.createElement('input')
 scrollGapToggle.type = 'checkbox'
-scrollGapToggle.className = 'dshwv-check'
+scrollGapToggle.className = 'dafyv-check'
 scrollGapToggle.checked = false
 scrollGapToggle.title = '开启后挂件右侧按设定像素避开滚动条；关闭则贴边（盖住滚动条）'
 scrollGapToggle.addEventListener('change', function () { setScrollGapOn(scrollGapToggle.checked) })
@@ -190,7 +188,7 @@ var scrollGapInput = document.createElement('input')
 scrollGapInput.type = 'number'
 scrollGapInput.min = '0'
 scrollGapInput.step = '1'
-scrollGapInput.className = 'dshwv-number'
+scrollGapInput.className = 'dafyv-number'
 scrollGapInput.value = '17'
 scrollGapInput.disabled = true // 默认避让关 → 宽度不可修改，勾选后启用
 scrollGapInput.title = '避让滚动条的像素宽度，填 0 表示贴边'
@@ -208,10 +206,10 @@ volInput.type = 'range'
 volInput.min = '0'
 volInput.max = '1'
 volInput.step = '0.05'
-volInput.className = 'dshwv-range'
+volInput.className = 'dafyv-range'
 volInput.value = '0.9'
 var volPct = document.createElement('span')
-volPct.className = 'dshwv-volpct'
+volPct.className = 'dafyv-volpct'
 volPct.textContent = '90%'
 volInput.addEventListener('input', function () { setVol(volInput.value) })
 var row3 = menuRow()
@@ -228,7 +226,7 @@ var row6 = menuRow()
 row6.appendChild(menuLabel('气泡'))
 row6.appendChild(bubbleToggle)
 var menuSep1 = document.createElement('div')
-menuSep1.className = 'dshwv-menu-sep'
+menuSep1.className = 'dafyv-menu-sep'
 var row7 = menuRow()
 row7.appendChild(menuLabel('每轮消耗提示'))
 row7.appendChild(turnCostToggle)
@@ -252,27 +250,27 @@ menuBox.appendChild(menuSep1)
 menuBox.appendChild(row9)
 
 var textBox = document.createElement('div')
-textBox.className = 'dshwv-text'
+textBox.className = 'dafyv-text'
 var labelEl = document.createElement('div')
-labelEl.className = 'dshwv-label'
+labelEl.className = 'dafyv-label'
 labelEl.textContent = 'DeepSeek 余额'
 var amountEl = document.createElement('div')
-amountEl.className = 'dshwv-amount'
+amountEl.className = 'dafyv-amount'
 var hintEl = document.createElement('div')
-hintEl.className = 'dshwv-hint'
+hintEl.className = 'dafyv-hint'
 textBox.appendChild(labelEl)
 textBox.appendChild(amountEl)
 textBox.appendChild(hintEl)
 
 var bubbleBox = document.createElement('div')
-bubbleBox.className = 'dshwv-bubble'
+bubbleBox.className = 'dafyv-bubble'
 bubbleBox.innerHTML = '<svg viewBox="0 0 1026 700" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
-  '<path class="dshwv-bshape" fill="#FFFFFF" stroke="#203170" stroke-width="18" stroke-linejoin="round" stroke-linecap="round" d="M 827 248 A 373 232 0 1 0 81 246 A 373 232 0 0 0 301 465 A 57 32 10 0 0 413 484 A 373 232 0 0 0 827 248 Z"/>' +
-  '<ellipse class="dshwv-b1" cx="352" cy="561" rx="37.5" ry="26" fill="#FFFFFF" stroke="#203170" stroke-width="18"/>' +
-  '<ellipse class="dshwv-b2" cx="442" cy="646" rx="24.5" ry="18" fill="#FFFFFF" stroke="#203170" stroke-width="18"/>' +
+  '<path class="dafyv-bshape" fill="#FFFFFF" stroke="#203170" stroke-width="18" stroke-linejoin="round" stroke-linecap="round" d="M 827 248 A 373 232 0 1 0 81 246 A 373 232 0 0 0 301 465 A 57 32 10 0 0 413 484 A 373 232 0 0 0 827 248 Z"/>' +
+  '<ellipse class="dafyv-b1" cx="352" cy="561" rx="37.5" ry="26" fill="#FFFFFF" stroke="#203170" stroke-width="18"/>' +
+  '<ellipse class="dafyv-b2" cx="442" cy="646" rx="24.5" ry="18" fill="#FFFFFF" stroke="#203170" stroke-width="18"/>' +
   '</svg>'
 var gifEl = document.createElement('img')
-gifEl.className = 'dshwv-gif'
+gifEl.className = 'dafyv-gif'
 gifEl.src = GIF_URL
 gifEl.alt = ''
 gifEl.draggable = false
@@ -303,7 +301,7 @@ bubbleBox.addEventListener('click', function (e) {
 })
 
 var body = document.createElement('div')
-body.className = 'dshwv-body'
+body.className = 'dafyv-body'
 body.appendChild(img)
 body.appendChild(bubbleBox)
 root.appendChild(body)
@@ -341,7 +339,7 @@ var bubbleShown = false
 var bubbleTimer = null
 var bubbleRandomActive = false
 var bubbleRandomLines = null
-var BUBBLE_STYLE_CLASS = { A: 'dshwv-label', B: 'dshwv-amount', P: 'dshwv-period', C: 'dshwv-hint' }
+var BUBBLE_STYLE_CLASS = { A: 'dafyv-label', B: 'dafyv-amount', P: 'dafyv-period', C: 'dafyv-hint' }
 function pickOne(arr) { return arr[Math.floor(Math.random() * arr.length)] }
 function singleCenter(style, text, color, wrap) { return [null, { t: text, s: style, c: color || '', w: !!wrap }, null] }
 function buildGroup1() {
@@ -404,7 +402,7 @@ function applyBubbleLines(lines) {
     var ln = lines && lines[i]
     if (ln) {
       el.style.display = ''
-      el.className = (BUBBLE_STYLE_CLASS[ln.s] || 'dshwv-label') + (ln.w ? ' dshwv-wrap' : '')
+      el.className = (BUBBLE_STYLE_CLASS[ln.s] || 'dafyv-label') + (ln.w ? ' dafyv-wrap' : '')
       el.textContent = ln.t
       el.style.color = ln.c || ''
     } else {
@@ -465,14 +463,14 @@ function restoreBubbleLines() {
   gifEl.style.display = 'none'
   gifEl.style.opacity = ''
   labelEl.style.display = ''
-  labelEl.className = 'dshwv-label'
+  labelEl.className = 'dafyv-label'
   labelEl.textContent = 'DeepSeek 余额'
   labelEl.style.color = ''
   amountEl.style.display = ''
-  amountEl.className = 'dshwv-amount'
+  amountEl.className = 'dafyv-amount'
   amountEl.style.color = ''
   hintEl.style.display = ''
-  hintEl.className = 'dshwv-hint'
+  hintEl.className = 'dafyv-hint'
   hintEl.style.color = ''
   render()
 }
@@ -485,7 +483,7 @@ function showBubble() {
   bubbleShown = true
   bubbleRandomActive = false
   restoreBubbleLines()
-  bubbleBox.classList.add('dshwv-bubble-open')
+  bubbleBox.classList.add('dafyv-bubble-open')
   // 默认展示当前内容；点击气泡切到随机台词段；总时长 5 秒自动关闭
   bubbleTimer = setTimeout(hideBubble, BUBBLE_MS)
 }
@@ -503,7 +501,7 @@ function hideBubble() {
   // 只销毁 gif 显示；三行文字保持现状让气泡自然淡出——不能在关闭瞬间
   // 恢复成余额内容（否则随机台词界面会闪现余额）。文字恢复交给下次
   // showBubble() 的 restoreBubbleLines()（那时气泡隐藏，恢复过程不可见）。
-  bubbleBox.classList.remove('dshwv-bubble-open')
+  bubbleBox.classList.remove('dafyv-bubble-open')
   // gif 靠 CSS opacity 过渡淡出；display:none 会跳过过渡，须等淡出完成再隐藏
   gifFadeTimer = setTimeout(function () {
     gifFadeTimer = null
@@ -531,11 +529,11 @@ function showCostBubble(amount, estimated) {
   gifEl.style.display = 'none'
   gifEl.style.opacity = ''
   labelEl.style.display = ''
-  labelEl.className = 'dshwv-label'
+  labelEl.className = 'dafyv-label'
   labelEl.textContent = estimated ? '上一轮对话消耗(估算):' : '上一轮对话消耗:'
   labelEl.style.color = ''
   amountEl.style.display = ''
-  amountEl.className = 'dshwv-amount'
+  amountEl.className = 'dafyv-amount'
   amountEl.textContent = (estimated ? '≈ ' : '') + '¥ ' + fmtCost(amount)
   amountEl.style.color = '#e0433f'
   hintEl.style.display = 'none'
@@ -543,7 +541,7 @@ function showCostBubble(amount, estimated) {
   hintEl.style.color = ''
   textBox.style.transition = ''
   textBox.style.opacity = ''
-  bubbleBox.classList.add('dshwv-bubble-open')
+  bubbleBox.classList.add('dafyv-bubble-open')
   if (turnCostCloseMs > 0) {
     costBubbleTimer = setTimeout(hideCostBubble, turnCostCloseMs)
   }
@@ -580,8 +578,8 @@ var safeInsets = { b: 0, r: 0 }
 function refreshSafeInsets() {
   try {
     var cs = getComputedStyle(root)
-    safeInsets.b = parseFloat(cs.getPropertyValue('--dshw-safe-b')) || 0
-    safeInsets.r = parseFloat(cs.getPropertyValue('--dshw-safe-r')) || 0
+    safeInsets.b = parseFloat(cs.getPropertyValue('--dafy-safe-b')) || 0
+    safeInsets.r = parseFloat(cs.getPropertyValue('--dafy-safe-r')) || 0
   } catch (err) { safeInsets.b = 0; safeInsets.r = 0 }
 }
 function rightGap() {
@@ -667,7 +665,7 @@ function express() {
   root.style.bottom = 'auto'
   root.style.left = state.left + 'px'
   root.style.top = state.top + 'px'
-  root.classList.toggle('dshwv-left', state.h === 'left')
+  root.classList.toggle('dafyv-left', state.h === 'left')
 }
 function settle() {
   var vp = viewport()
@@ -700,7 +698,7 @@ function updateAutoDim() {
   // 官渠检测：正文源 = deepseek → 亮色自动；否则半暗，点击手动刷新
   var rt = window.__dafyRuntime
   var auto = !(rt && rt.state) ? true : !!rt.state.autoMode
-  root.classList.toggle('dshwv-dim', !auto)
+  root.classList.toggle('dafyv-dim', !auto)
   return auto
 }
 function refresh(manual) {
@@ -720,7 +718,11 @@ function refresh(manual) {
     var snap = rt.getLedgerSnapshot()
     state.todayUsage = snap.todayUsage
     state.isPeak = snap.isPeak
-    if (state.balance === null && state.status !== 'error') state.status = 'ok'
+    if (rt.state && rt.state.keySource === 'none') {
+      state.status = 'nokey'
+      state.balance = null
+      state.currency = 'CNY'
+    } else if (state.balance === null && state.status !== 'error') state.status = 'ok'
     render()
     busy = false
     return
@@ -893,7 +895,7 @@ function setScale(v) {
   var fx = state.h === 'left' ? rect.left : rect.right
   var fy = rect.bottom
   state.scale = next
-  root.style.setProperty('--dshw-scale', String(next))
+  root.style.setProperty('--dafy-scale', String(next))
   scaleInput.value = String(next)
   scaleNumber.value = String(scaleToDisplay(next))
   saveConfig()
@@ -1015,12 +1017,12 @@ var menuOpen = false
 function toggleMenu() {
   menuOpen = !menuOpen
   if (menuOpen) positionMenu()
-  menuBox.classList.toggle('dshwv-menu-open', menuOpen)
-  if (menuOpen) menuBtn.classList.add('dshwv-menu-btn-visible')
+  menuBox.classList.toggle('dafyv-menu-open', menuOpen)
+  if (menuOpen) menuBtn.classList.add('dafyv-menu-btn-visible')
 }
 function closeMenu() {
   menuOpen = false
-  menuBox.classList.remove('dshwv-menu-open')
+  menuBox.classList.remove('dafyv-menu-open')
   root.style.transition = ''
   snapCheck()
 }
@@ -1094,8 +1096,7 @@ function setupHitTest() {
     var probe = new Image()
     probe.onload = function () {
       try {
-        // 拉伸到 610×610 与 isWhaleHit 的坐标映射对齐；不指定尺寸会按原图大小绘制，
-        // 回退到非 610×610 素材（如 DSniang02.png）时命中区域会错位
+        // Stretch the probe to the fixed 610x610 hit-test coordinate space.
         hitCanvas.getContext('2d').drawImage(probe, 0, 0, 610, 610)
         hitReady = true
       } catch (err) {}
@@ -1135,7 +1136,7 @@ function clearLongPress() {
 }
 function onDocPointerDown(e) {
   if (e.target && e.target.closest) {
-    if (e.target.closest('.dshwv-bubble') || e.target.closest('.dshwv-menu') || e.target.closest('.dshwv-menu-btn')) return
+    if (e.target.closest('.dafyv-bubble') || e.target.closest('.dafyv-menu') || e.target.closest('.dafyv-menu-btn')) return
   }
   if (menuOpen) {
     closeMenu()
@@ -1147,7 +1148,7 @@ function onDocPointerDown(e) {
   var vp = viewport()
   var rect = root.getBoundingClientRect()
   drag = { active: true, startX: e.clientX, startY: e.clientY, origLeft: rect.left, origTop: rect.top, w: rect.width, h: rect.height, moved: false, suppressed: false, pointerType: e.pointerType || '', vp: vp }
-  root.classList.add('dshwv-dragging')
+  root.classList.add('dafyv-dragging')
   pressDown()
   setWidgetCursor('grabbing')
   document.addEventListener('pointermove', onDocPointerMove, true)
@@ -1197,6 +1198,21 @@ function onDocClickStopper(e) {
 document.addEventListener('pointerdown', onDocPointerDown, true)
 document.addEventListener('click', onDocClickStopper, true)
 
+function isPluginControlTarget(e) {
+  return !!(e.target && e.target.closest && (
+    e.target.closest('.dafyv-bubble') ||
+    e.target.closest('.dafyv-menu') ||
+    e.target.closest('.dafyv-menu-btn')
+  ))
+}
+function onDocContextMenu(e) {
+  // Touch long-press also fires contextmenu in some browsers; leave it to longPressTimer.
+  if (e.button !== 2 || isPluginControlTarget(e) || !isWhaleHit(e)) return
+  try { e.preventDefault(); e.stopPropagation() } catch (err) {}
+  toggleMenu()
+}
+document.addEventListener('contextmenu', onDocContextMenu, true)
+
 var widgetCursor = ''
 function setWidgetCursor(v) {
   if (v !== widgetCursor) {
@@ -1211,14 +1227,14 @@ function onDocPointerMoveCursor(e) {
   if (drag && drag.active) { setWidgetCursor('grabbing'); return }
   var el = null
   try { el = document.elementFromPoint(e.clientX, e.clientY) } catch (err) {}
-  if (el && el.closest && (el.closest('.dshwv-bubble') || el.closest('.dshwv-menu') || el.closest('.dshwv-menu-btn'))) {
+  if (el && el.closest && (el.closest('.dafyv-bubble') || el.closest('.dafyv-menu') || el.closest('.dafyv-menu-btn'))) {
     setWidgetCursor('')
-    menuBtn.classList.add('dshwv-menu-btn-visible')
+    menuBtn.classList.add('dafyv-menu-btn-visible')
     return
   }
   var over = isWhaleHit(e)
   setWidgetCursor(over ? 'grab' : '')
-  menuBtn.classList.toggle('dshwv-menu-btn-visible', over || menuOpen)
+  menuBtn.classList.toggle('dafyv-menu-btn-visible', over || menuOpen)
 }
 document.addEventListener('pointermove', onDocPointerMoveCursor, true)
 
@@ -1230,7 +1246,7 @@ function endDrag(e, clickAllowed) {
   document.removeEventListener('pointerup', onDocPointerUp, true)
   document.removeEventListener('pointercancel', onDocPointerCancel, true)
   pressUp()
-  root.classList.remove('dshwv-dragging')
+  root.classList.remove('dafyv-dragging')
   setWidgetCursor(isWhaleHit(e) ? 'grab' : '')
   if (clickAllowed && !drag.moved && !drag.suppressed) { showBubble(); refresh(true); return }
   if (drag.suppressed) { settle(); return } // 长按开菜单：位置不动，直接收尾
@@ -1322,7 +1338,7 @@ setupHitTest()
   var d = (rt0 && typeof rt0.getConfig === 'function') ? rt0.getConfig() : null
   if (d && typeof d.scale === 'number' && d.scale >= MIN_SCALE - 0.1 && d.scale <= MAX_SCALE + 0.1) {
     state.scale = d.scale
-    root.style.setProperty('--dshw-scale', String(d.scale))
+    root.style.setProperty('--dafy-scale', String(d.scale))
     scaleInput.value = String(d.scale)
     scaleNumber.value = String(scaleToDisplay(d.scale))
     settle()

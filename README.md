@@ -1,8 +1,8 @@
 # DAFEIYU — DeepSeek 余额小鲸鱼（酒馆纯前端版）
 
-[原作 MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)（DSH 插件）的纯前端移植：**一条 URL 安装，无需服务端插件、无需改 config.yaml、消耗统计零配置**。右下角小鲸鱼 🐳 帮你盯着 DeepSeek 的余额与消耗，原版交互全保留（拖拽 / 缩放 / 按压音效 / 随机台词 / 峰谷判定 / 右键菜单，移动端长按弹菜单）。
+DAFEIYU 是 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 SillyTavern 纯前端移植：一条 URL 安装扩展即可使用，不需要服务端插件、不需要修改 `config.yaml`、不需要另装伴身组件。小鲸鱼会在右下角显示 DeepSeek 余额与今日消耗，并保留拖拽、缩放、按压音效、随机台词、峰谷判定、右键菜单与移动端长按菜单。
 
-## 安装
+## 安装与配置
 
 SillyTavern → 扩展面板 → 「输入扩展程序的 Git URL 以安装」：
 
@@ -10,62 +10,63 @@ SillyTavern → 扩展面板 → 「输入扩展程序的 Git URL 以安装」�
 https://github.com/TOKEN-MONA/DAFEIYU
 ```
 
-安装后刷新页面即用。要求 SillyTavern 1.12+（扩展以 ES Module 加载，开发验证基于 1.18.0/1.14.0）。
+安装后刷新页面即用。扩展按 SillyTavern 1.12+ 的第三方扩展 ES Module 方式加载；已对照 1.12.14 的扩展加载器/DeepSeek 后端路径与 1.18.0 的后端路径做兼容检查。没有修改酒馆源码，因此不依赖特定服务端补丁。
 
-## 功能
+- **消耗统计**：无需配置。扩展在前端截获酒馆聊天补全响应并统计 DeepSeek 用量。
+- **余额显示**：在扩展面板「DeepSeek 余额小鲸鱼 (DAFEIYU)」填入你自己的 DeepSeek API Key。Key 只用于查询 `user/balance`，与正文模型连接相互独立。
+- **API 地址**：默认 `https://api.deepseek.com`；如需中转，必须使用 `https://`。非官方域名保存前会展示 Key 将发往的完整地址并要求二次确认。
 
-### 实时消耗统计（零配置）
+## 用量统计方式
 
-正文连接源选 DeepSeek 时自动统计，**不需要任何 Key**：
+DAFEIYU 会在浏览器 `fetch` 层识别正文 DeepSeek 请求：
 
-- 自动为流式请求注入 `stream_options.include_usage`，截获酒馆后端透传响应里的真实 `usage`（含缓存命中/未命中 token），按官方价格表（峰谷 × 缓存分层）计价
-- 中转剥离 `usage` 时自动降级为 token 估算：prompt 按请求体全文、输出按实际生成文本，经酒馆分词器计数；泡泡带 `≈/(估算)` 标识，金额照常计入今日已用
-- 每轮弹出「上一轮对话消耗」泡泡（不足一分时显示 4 位小数），按日累计「今日已用」，保留 30 天历史，跨天自动归档
-- 标题生成、填表/记忆插件的后台请求自动识别、静默处理：真实 DeepSeek 消耗悄悄入账（不弹泡、不占「已截获」计数）；实际服务别家模型的请求直接忽略
+1. 尽量在流式请求体中加入 `stream_options.include_usage`。部分 SillyTavern 后端会重建请求并丢弃该字段，因此这只是兼容性尝试，不是功能前提。
+2. 克隆并解析后端转发回来的 JSON / SSE 响应；若响应携带 `usage`，按真实 token 数精确计价。
+3. 若中转或酒馆版本剥离了 `usage`，则使用请求 prompt 与解析出的实际生成文本估算，金额带 `≈` 标识。
+4. 标题生成、填表、记忆等后台请求拿到真实 DeepSeek `usage` 时静默入账；确认服务的是其他厂商模型时不入账。
 
-### 余额显示（可选）
+估算使用酒馆 tokenizer（可用时），否则使用共享的 CJK/非 CJK 启发式。不要把估算值当作账单精确值；面板摘要中的「今日估算」显示估算轮数。
 
-扩展面板 →「DeepSeek 余额小鲸鱼 (DAFEIYU)」填入你自己的 DeepSeek API Key：
+价格表基于 2026-09-12 的 DeepSeek 官方价格：Flash 缓存命中 0.02/0.04、缓存未命中 1/2、输出 4/8 元每百万 token（空闲/高峰），Pro 为 0.15/0.3、4.5/9、13.5/27。峰谷按北京时间计算，2026-08-23 起周末全天谷价。
 
-- Key 与正文模型连接**相互独立**，以混淆形式只存本机浏览器（不进酒馆设置/备份/导出，`allowKeysExposure` 保持默认即可）
-- 查询经独立 Worker 线程直连 `user/balance`；带 `Authorization` 会触发 CORS 预检，能否直连以实测为准，被拦截时仅余额区报错
-- 「API 地址」支持中转（需兼容官方余额接口），**必须 `https://`**；非官方域名保存时弹窗展示 Key 将发往的完整地址、需二次确认
+## 用量模式
 
-### 用量模式（右键鲸鱼菜单切换）
+右键鲸鱼（触屏长按）可切换：
 
 | 模式 | 说明 |
 |---|---|
-| **小鲸鱼记账（默认）** | 今日已用 = 官方余额下跌，账面真值；需填 Key，未填 Key 时自动回落实时统计；受余额刷新滞后影响，小额对话常显示 0.00 |
-| **实时·精确** | 上一节的 usage 截获计价，每轮即时更新 |
+| **小鲸鱼记账（默认）** | 以余额下跌为主，同时保留实时统计作为跨天首次查询前的携带账本，减少“今日显示 0”的情况。需填 Key；未填 Key 时自动回落实时统计。 |
+| **实时·精确 / 估算** | 直接使用响应 `usage` 或估算结果，每轮即时更新。 |
 
-正文源非 DeepSeek 时小鲸鱼半暗（消耗统计照常），点击可手动查一次余额。
+正文源非 DeepSeek 时小鲸鱼半暗、不自动查余额；点击可手动查一次。未填 Key 时显示 `--` 而不是无限加载。
 
-## 常见问题
+## 兼容性与数据
 
-- **消耗是精确值吗？**
-  官方直连与透传中转拿到 usage 即精确；剥离 usage 的中转走估算（带 `≈` 标识）。经中转且模型名非 deepseek 家族时按 DeepSeek 基础价近似计价。面板摘要「已截获 N 轮（今日估算 M）」可看捕获质量：发一条消息 N 应 +1，M 持续增长说明该中转在剥 usage。
-- **为什么会有一次估算？**
-  每次重新启动酒馆后的第一次对话会触发一次估算，因为更新有滞后性，所以几乎没办法修改，但是并不影响后续使用。
-- **「今日已用」显示 0？**
-  默认记账模式只统计余额下跌，受余额刷新滞后影响常显示 0.00——在意即时数字请切到「实时·精确」。
-- **数据存在哪？**
-  本机浏览器 localStorage（`dafy-*` 键），换浏览器/设备不共享。多标签页共享同一账本、金额合并累计，跨页显示自动同步。
-- **和 v0.2.10-st1 双件版能一起装吗？**
-  可以。独立 `dafy-*` 键与 `__dafy*` 全局守卫互不干扰；首次启动自动拷贝双件版遗留的位置数据（原键不动）。
-- **移动端？**
-  已适配：触屏拖拽/点击（长按鲸鱼弹菜单，相当于右键）、软键盘弹出时保持原位、刘海与底部横条安全区避让、地址栏收展防抖。捏合缩放暂不支持，用菜单「大小」滑块。
-- **卸载？**
-  扩展面板删除即可；`dafy-*` 键可手动清理（`dshw-*` 为旧版/双件版遗留，可不必理会）。
+- 不依赖 `STREAM_TOKEN_RECEIVED` 事件生成估算：输出文本直接从响应体解析，旧版酒馆事件不完整时仍可统计。
+- 酒馆缺少生成事件时，DeepSeek 请求不再被误判为后台 quiet prompt。
+- 数据存于本机浏览器 `localStorage`（`dafy-*` 键）。多标签页在支持 Web Locks 的浏览器中串行化账本写入；非安全上下文等旧环境退化为 best-effort。
+- CSS/DOM 使用 `dafyv-*` 命名空间，可与旧 `dshwv-*` 双件版共存。
+- 换浏览器/设备不共享数据；卸载扩展后可手动清理 `dafy-*` 键。
 
-## 隐私与安全
+## 隐私与安全边界
 
-- **默认零密钥**：不填 Key 时不持有任何密钥、不发任何余额请求
-- **Key 的防护**：不进 extensionSettings/settings.json（其他扩展一行读不到）；余额请求走独立 Worker 线程，`Worker/Blob/postMessage/fetch` 均用求值期捕获的原始引用，晚加载脚本的包装与原型补丁截不到；全程不打印密钥，保存后立即清空输入框
-- **诚实边界**：保险库是混淆而非加密；同页面脚本的终极权限是读本页一切数据——**早于本扩展求值的**恶意包装纯前端无法防御。绝对安全需服务端方案（双件版即此路线）
+- 不填 Key 时不持有任何密钥、不发余额请求。
+- Key 不写入 `extensionSettings/settings.json`，不随酒馆备份/导出；以混淆形式存于本机 `localStorage`。
+- 余额请求优先在独立 Worker 线程发出，降低常见页面包装脚本截获请求的机会；Worker 不可用时才回退页面 `fetch`。
+- 纯前端扩展无法防御更早加载的恶意脚本、浏览器扩展或能读取本页数据的程序。混淆不是加密；绝对不落地明文需要服务端方案。
+
+## 开发验证
+
+```bash
+node --test tests/*.test.mjs
+node --check index.js widget.js core.js
+```
+
+测试覆盖当前价格表、北京时间峰谷、SSE/JSON 解析、跨天账本、余额账本携带、旧事件降级、右键菜单与 CSS 命名空间。
 
 ## 致谢与许可
 
-- 原作：[MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)（DSH 插件版，MIT）
-- SillyTavern 移植版 v0.2.10-st1 作者：TOKEN MONA（双件版结构参考）
-- DAFEIYU前端主要制作/更新作者：DBSoH
-- License：MIT（上游 MeteorNOX + 本仓库双版权行，见 [LICENSE](LICENSE)）；鲸鱼形象与音效素材版权归原作所有
+- 原作：[MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)（MIT）
+- SillyTavern 移植版 v0.2.10-st1 作者：TOKEN MONA
+- DAFEIYU 前端主要制作/更新：DBSoH
+- License：MIT，见 [LICENSE](LICENSE)；鲸鱼形象与音效素材版权归原作所有。
