@@ -49,3 +49,50 @@ test('engine mode copy does not overpromise exact usage', () => {
   assert.equal(index.includes('实时·精确（usage 截获）'), false);
   assert.match(widget, /实时·精确 \/ 估算/);
 });
+test('balance fetch retries transient failures and serves stale cache', () => {
+  const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /shouldRetryBalanceResult/);
+  assert.match(source, /isTransientBalanceResult\(payload\)/);
+  assert.match(source, /balanceCache\.payload,[\s\S]*?stale: true/);
+});
+
+test('manual refresh animates while background refresh stays quiet', () => {
+  const source = readFileSync(new URL('../widget.js', import.meta.url), 'utf8');
+  assert.match(source, /var clickDelay = 0/);
+  assert.match(source, /else if \(manual\)/);
+  assert.doesNotMatch(source, /if \(!manual\) \{\s*showBubble\(\)/);
+  assert.match(source, /clickDelay = alreadyOpen \? 0 : 550/);
+});
+
+test('cost bubble displays the turn token total', () => {
+  const source = readFileSync(new URL('../widget.js', import.meta.url), 'utf8');
+  assert.match(source, /showCostBubble\(Number\(turn\.amount\), !!turn\.estimated, usageTokenCount\(turn\.tokens\)\)/);
+  assert.match(source, /tok/);
+});
+
+test('usage pricing prefers the response creation timestamp', () => {
+  const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /handleUsage\(response, parsed\.usage, parsed\.model \|\| model, parsed\.createdAtSec\)/);
+  assert.match(source, /Number\.isFinite\(createdAtSec\) \? createdAtSec : Math\.floor\(Date\.now\(\) \/ 1000\)/);
+});
+
+test('widget reports configuration persistence failures', () => {
+  const source = readFileSync(new URL('../widget.js', import.meta.url), 'utf8');
+  assert.match(source, /markSaveResult/);
+  assert.match(source, /dafyv-save-error/);
+  assert.match(source, /保存失败/);
+});
+
+
+test('extension settings report vault persistence failures', () => {
+  const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /const saved = vaultWrite\(apiKey \|\| undefined, apiBase\)/);
+  assert.match(source, /saved \? '已保存' : '保存失败，请检查浏览器存储权限'/);
+});
+
+test('manifest and runtime versions identify this synchronized release', () => {
+  const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.version, '0.6.1');
+  assert.match(index, /version: '0\.6\.1'/);
+});

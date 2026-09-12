@@ -5,9 +5,11 @@ import {
     extractPromptText,
     isDeepseekModel,
     isPeakTime,
+    isTransientBalanceResult,
     parseModelResponse,
     rollBalanceLedger,
     rollEngineLedger,
+    shouldRetryBalanceResult,
     todayKey,
 } from './core.js';
 
@@ -63,7 +65,13 @@ import {
         } catch (err) { return fallback; }
     }
     function writeLS(key, value) {
-        try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* quota/full */ }
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+            return true;
+        } catch (err) {
+            console.warn('[DAFEIYU] localStorage write failed', key, err);
+            return false;
+        }
     }
 
     // —— 命名空间（dafy-*）：与 v0.2.10-st1 双件版（dshw-*/__dshWhaleWidget）互不冲突，两者可共存 ——
@@ -141,7 +149,7 @@ import {
     // ==================== 运行时桥（index.js ↔ widget.js） ====================
     const listeners = { turn: [], state: [] };
     const runtime = window.__dafyRuntime = {
-        version: '0.6.0',
+        version: '0.6.1',
         state: {
             keySource: 'none',   // 'tavern' | 'extension' | 'none'
             keyHint: '',         // 读不到密钥时的 actionable 提示
@@ -154,7 +162,7 @@ import {
         emitState() { listeners.state.forEach((f) => { try { f(runtime.state); } catch (err) { /* noop */ } }); },
         // 挂件配置持久化（localStorage）
         getConfig() { return readLS(K_CONFIG, null); },
-        saveConfig(cfg) { writeLS(K_CONFIG, cfg); },
+        saveConfig(cfg) { return writeLS(K_CONFIG, cfg); },
         getUsageMode() {
             const c = readLS(K_CONFIG, {}) || {};
             // 默认小鲸鱼记账（与原作一致；未填 Key 时快照层自动回落实时统计）。
@@ -259,7 +267,7 @@ import {
         obj.k = k ? vaultEncode(k) : '';
         const b = (apiBase === undefined) ? cur.apiBase : apiBase;
         obj.b = typeof b === 'string' ? b : '';
-        writeLS(VAULT_NAME, obj);
+        return writeLS(VAULT_NAME, obj);
     }
     function vaultClear() {
         try { localStorage.removeItem(VAULT_NAME); } catch (err) { /* noop */ }
@@ -412,7 +420,7 @@ import {
         return _origFetch(url, { ...options, signal: controller.signal })
             .finally(() => clearTimeout(timer));
     }
-    async function fetchBalanceDirect(key, apiBase) {
+    async function fetchBalanceAttempt(key, apiBase) {
         const base = normalizeBase(apiBase);
         if (!base) return { ok: false, code: 'BASE', error: 'API 地址无效：必须是以 https:// 开头的合法地址' };
         // 优先走 Worker 隔离通道
@@ -451,6 +459,15 @@ import {
             return { ok: false, code: 'ERROR', error: '余额查询失败: ' + String((err && err.message) || err).slice(0, 120) };
         }
     }
+    async function fetchBalanceDirect(key, apiBase) {
+        let payload = await fetchBalanceAttempt(key, apiBase);
+        if (shouldRetryBalanceResult(payload)) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            payload = await fetchBalanceAttempt(key, apiBase);
+        }
+        if (!payload.ok) return { ...payload, transient: isTransientBalanceResult(payload) };
+        return payload;
+    }
     async function getBalance(force) {
         const now = Date.now();
         const mode = runtime.getUsageMode();
@@ -471,6 +488,14 @@ import {
             const payload = await fetchBalanceDirect(key, v.apiBase);
             if (!payload.ok) {
                 console.warn('[DAFEIYU]', payload.code, payload.error);
+                if (isTransientBalanceResult(payload) && balanceCache) {
+                    return {
+                        ...base,
+                        ...balanceCache.payload,
+                        stale: true,
+                        todayUsage: ledgerTodayOrEngine(mode),
+                    };
+                }
                 return { ...base, ...payload, todayUsage: getEngineLedger().todayUsage };
             }
             balanceCache = { at: Date.now(), payload };
@@ -549,7 +574,7 @@ import {
         }
         emitTurn({ ...turnResult, todayUsage: led.todayUsage });
     }
-    async function handleUsage(response, usage, model) {
+    async function handleUsage(response, usage, model, createdAtSec) {
         const turn = activeTurns.get(response);
         if (!turn) return; // 已结算（真实或估算）或已丢弃：迟到 usage 不再入账
         // 后台请求若实际服务的不是 DeepSeek 家族模型（响应 model 优先于请求 model），
@@ -559,7 +584,7 @@ import {
             activeTurns.delete(response);
             return;
         }
-        const t = Math.floor(Date.now() / 1000);
+        const t = Number.isFinite(createdAtSec) ? createdAtSec : Math.floor(Date.now() / 1000);
         const cost = costFromUsage(usage, model, t);
         await settleTurn(response, { ...cost, usage, model: model || '', estimated: false }, turn.quiet);
     }
@@ -673,7 +698,7 @@ import {
                 readBodyClone(response.clone(), (parsed) => {
                     const turn = activeTurns.get(response);
                     if (turn && parsed.outputText) turn.outText = parsed.outputText;
-                    if (parsed.usage) void handleUsage(response, parsed.usage, parsed.model || model);
+                    if (parsed.usage) void handleUsage(response, parsed.usage, parsed.model || model, parsed.createdAtSec);
                 })
                     .then(() => {
                         const tn = activeTurns.get(response);
@@ -829,10 +854,10 @@ import {
                 }
             }
             // Key 走混淆保险库（undefined=保持现值），绝不写入 extensionSettings
-            vaultWrite(apiKey || undefined, apiBase);
+            const saved = vaultWrite(apiKey || undefined, apiBase);
             invalidateKey();
             balanceCache = null;
-            setStatus('已保存');
+            setStatus(saved ? '已保存' : '保存失败，请检查浏览器存储权限');
             drawer.querySelector('#dafy-apikey').value = ''; // 立即清空输入框
             refreshSummary();
         });

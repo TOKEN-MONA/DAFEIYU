@@ -111,25 +111,28 @@ function extractChoiceText(choices, messageKey, deltaKey) {
 
 export function parseModelResponse(responseText) {
     const text = String(responseText || '').trim();
-    if (!text) return { usage: null, model: '', outputText: '' };
+    if (!text) return { usage: null, model: '', outputText: '', createdAtSec: null };
 
     if (text.startsWith('{') || text.startsWith('[')) {
         try {
             const obj = JSON.parse(text);
             const item = Array.isArray(obj) ? obj[obj.length - 1] : obj;
-            if (!item || typeof item !== 'object') return { usage: null, model: '', outputText: '' };
+            if (!item || typeof item !== 'object') return { usage: null, model: '', outputText: '', createdAtSec: null };
+            const createdAt = Number(item.created);
             return {
                 usage: item.usage && typeof item.usage === 'object' ? item.usage : null,
                 model: typeof item.model === 'string' ? item.model : '',
                 outputText: extractChoiceText(item.choices, 'message', 'delta'),
+                createdAtSec: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : null,
             };
         } catch {
-            return { usage: null, model: '', outputText: '' };
+            return { usage: null, model: '', outputText: '', createdAtSec: null };
         }
     }
 
     let usage = null;
     let model = '';
+    let createdAtSec = null;
     const output = [];
     for (const rawLine of text.split(/\r?\n/)) {
         const line = rawLine.trim();
@@ -140,13 +143,15 @@ export function parseModelResponse(responseText) {
             const obj = JSON.parse(payload);
             if (!obj || typeof obj !== 'object') continue;
             if (typeof obj.model === 'string' && obj.model) model = obj.model;
+            const created = Number(obj.created);
+            if (Number.isFinite(created) && created > 0) createdAtSec = created;
             if (obj.usage && typeof obj.usage === 'object') usage = obj.usage;
             output.push(extractChoiceText(obj.choices, 'message', 'delta'));
         } catch {
             // A relay may emit a malformed keep-alive line; ignore it and keep scanning.
         }
     }
-    return { usage, model, outputText: output.join('') };
+    return { usage, model, outputText: output.join(''), createdAtSec };
 }
 
 export function countTokensHeuristic(text) {
@@ -268,4 +273,22 @@ export function rollBalanceLedger(raw, balance, currency, engineUsage, dateKey) 
     ledger.history = ledger.history || {};
     pruneHistory(ledger.history);
     return ledger;
+}
+
+export function isTransientBalanceResult(result) {
+    if (!result || result.ok || typeof result.code !== 'string') return false;
+    if (result.code === 'ERROR') return true;
+    const match = /^HTTP(\d+)$/.exec(result.code);
+    return !!match && Number(match[1]) >= 500;
+}
+
+export function shouldRetryBalanceResult(result) {
+    return isTransientBalanceResult(result);
+}
+
+export function usageTokenCount(tokens) {
+    if (!tokens || typeof tokens !== 'object') return 0;
+    return Math.max(0, finiteNumber(tokens.hit))
+        + Math.max(0, finiteNumber(tokens.miss))
+        + Math.max(0, finiteNumber(tokens.out));
 }

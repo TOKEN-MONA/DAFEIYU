@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 import {
   priceFor,
   isPeakTime,
+  isTransientBalanceResult,
   parseModelResponse,
   rollEngineLedger,
+  shouldRetryBalanceResult,
+  usageTokenCount,
   rollBalanceLedger,
 } from '../core.js';
 
@@ -109,4 +112,34 @@ test('balance ledger keeps accrued usage across a top-up', () => {
 
   const spentAgain = rollBalanceLedger(toppedUp, 19, 'CNY', 0.3, '2026-09-12');
   assert.equal(spentAgain.todayUsage, 2.3);
+});
+test('balance transient and retry classification follows upstream behavior', () => {
+  assert.equal(shouldRetryBalanceResult({ ok: false, code: 'ERROR' }), true);
+  assert.equal(shouldRetryBalanceResult({ ok: false, code: 'HTTP500' }), true);
+  assert.equal(shouldRetryBalanceResult({ ok: false, code: 'HTTP503' }), true);
+  assert.equal(shouldRetryBalanceResult({ ok: false, code: 'HTTP401' }), false);
+  assert.equal(shouldRetryBalanceResult({ ok: false, code: 'SHAPE' }), false);
+
+  assert.equal(isTransientBalanceResult({ ok: false, code: 'ERROR' }), true);
+  assert.equal(isTransientBalanceResult({ ok: false, code: 'HTTP500' }), true);
+  assert.equal(isTransientBalanceResult({ ok: false, code: 'HTTP401' }), false);
+  assert.equal(isTransientBalanceResult({ ok: false, code: 'BASE' }), false);
+});
+
+test('model response parser preserves the usage chunk creation time', () => {
+  const parsed = parseModelResponse([
+    'data: {"created":1770000000,"model":"deepseek-flash","choices":[{"delta":{"content":"你"}}]}',
+    'data: {"created":1770000060,"model":"deepseek-flash","choices":[{"delta":{"content":""}}],"usage":{"prompt_tokens":20,"completion_tokens":2}}',
+    'data: [DONE]',
+  ].join('\n\n'));
+  assert.equal(parsed.createdAtSec, 1770000060);
+});
+
+test('usage token count uses the full hit/miss/output total', () => {
+  assert.equal(usageTokenCount({
+    hit: 1,
+    miss: 20,
+    out: 2,
+  }), 23);
+  assert.equal(usageTokenCount(null), 0);
 });

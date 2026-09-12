@@ -1,3 +1,5 @@
+import { usageTokenCount } from './core.js';
+
 (function () {
 // 守卫已命名空间化（__dafyWidget）：与 v0.2.10-st1 双件版的 __dshWhaleWidget 守卫互不冲突，两者可共存
 if (window.__dafyWidget) return
@@ -7,7 +9,6 @@ var MIN_SCALE = 0.6
 var MAX_SCALE = 2.5
 var CLICK_SQ = 9
 var REFRESH_MS = 60000
-var CHANGE_MS = 900
 var ANIM_MS = 700
 var BUBBLE_MS = 5000
 // DAFEIYU 纯前端版：资源随扩展目录走（本文件由 index.js 以模块相对路径动态加载，
@@ -19,8 +20,9 @@ var GIF_URL = ASSET_BASE + 'rua.gif'
 function saveSizeConfig(cfg) {
   try {
     var rt = window.__dafyRuntime
-    if (rt && typeof rt.saveConfig === 'function') rt.saveConfig(cfg)
+    if (rt && typeof rt.saveConfig === 'function') return rt.saveConfig(cfg)
   } catch (err) {}
+  return false
 }
 
 
@@ -61,6 +63,7 @@ var css = [
   '.dafyv-menu-btn:hover{background:#203170}',
   '.dafyv-menu{position:fixed;min-width:196px;background:rgba(255,255,255,.92);border:1px solid rgba(32,49,112,.35);border-radius:10px;padding:10px 12px;opacity:0;transform:scale(.92) translateY(-4px);transform-origin:top right;transition:opacity .18s ease,transform .2s cubic-bezier(.34,1.56,.64,1);pointer-events:none;z-index:10000;box-shadow:0 6px 18px rgba(0,0,0,.18);color-scheme:light}',
   '.dafyv-menu.dafyv-menu-open{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}',
+  '.dafyv-menu.dafyv-save-error::after{content:\'设置保存失败\';display:block;margin-top:6px;color:#c0392b;font-size:12px;line-height:1.2;white-space:normal}',
   '.dafyv-menu-row{display:flex;align-items:center;gap:8px;margin:5px 0;color:#203170;font-size:12px;white-space:nowrap}',
   '.dafyv-range{flex:1;min-width:0;accent-color:#203170}',
   '.dafyv-number{width:44px;border:1px solid rgba(32,49,112,.4);border-radius:6px;padding:2px 4px;font-size:12px;color:#203170;background:#fff;box-sizing:border-box}',
@@ -335,6 +338,7 @@ var animDelayTimer = null
 var drag = null
 var shown = null
 var animId = null
+var clickDelay = 0
 var bubbleShown = false
 var bubbleTimer = null
 var bubbleRandomActive = false
@@ -511,7 +515,7 @@ function hideBubble() {
 
 // —— 每轮对话消耗金额泡泡 ——
 var costBubbleTimer = null
-function showCostBubble(amount, estimated) {
+function showCostBubble(amount, estimated, tokens) {
   if (!bubbleOn || !turnCostOn) return
   if (costBubbleTimer) { clearTimeout(costBubbleTimer); costBubbleTimer = null }
   if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null }
@@ -536,9 +540,16 @@ function showCostBubble(amount, estimated) {
   amountEl.className = 'dafyv-amount'
   amountEl.textContent = (estimated ? '≈ ' : '') + '¥ ' + fmtCost(amount)
   amountEl.style.color = '#e0433f'
-  hintEl.style.display = 'none'
-  hintEl.textContent = ''
-  hintEl.style.color = ''
+  var tokenCount = Number(tokens)
+  if (Number.isFinite(tokenCount) && tokenCount > 0) {
+    hintEl.style.display = ''
+    hintEl.textContent = Math.round(tokenCount).toLocaleString('en-US') + ' tok'
+    hintEl.style.color = ''
+  } else {
+    hintEl.style.display = 'none'
+    hintEl.textContent = ''
+    hintEl.style.color = ''
+  }
   textBox.style.transition = ''
   textBox.style.opacity = ''
   bubbleBox.classList.add('dafyv-bubble-open')
@@ -744,35 +755,33 @@ function refresh(manual) {
         }
         var nb = Number(data.totalBalance)
         var nc = String(data.currency || 'CNY')
-        var changed = state.balance !== null && (nb !== state.balance || nc !== state.currency)
         var currencyChanged = state.currency !== null && nc !== state.currency
         state.balance = nb
         state.currency = nc
-        state.message = ''
+        state.message = data.stale ? '正在使用上次余额' : ''
         state.todayUsage = data.todayUsage !== undefined ? data.todayUsage : null
         state.isPeak = !!data.isPeak
-        if (changed && !currencyChanged) {
-          if (!manual) {
-            showBubble()
-            state.status = 'changing'
-            // balance-change bubble: wait 0.3s after it floats out, then roll the number
-            if (animDelayTimer) clearTimeout(animDelayTimer)
-            animDelayTimer = setTimeout(function () {
-              animDelayTimer = null
-              animateAmount(shown, nb, nc, ANIM_MS)
-            }, 300)
-            if (settleTimer) clearTimeout(settleTimer)
-            settleTimer = setTimeout(function () {
-              settleTimer = null
-              if (state.status === 'changing') { state.status = 'ok'; render() }
-            }, CHANGE_MS + 300)
-          } else {
-            animateAmount(shown, nb, nc, ANIM_MS)
-            state.status = 'ok'
-            render()
-          }
-        } else {
+        if (currencyChanged) {
           if (animId === null) shown = nb
+          state.status = 'ok'
+          render()
+        } else if (manual) {
+          if (shown !== null && isFinite(shown) && shown !== nb) {
+            if (clickDelay > 0) {
+              if (animDelayTimer) clearTimeout(animDelayTimer)
+              animDelayTimer = setTimeout(function () {
+                animDelayTimer = null
+                animateAmount(shown, nb, nc, ANIM_MS)
+              }, clickDelay)
+            } else {
+              animateAmount(shown, nb, nc, ANIM_MS)
+            }
+          }
+          state.status = 'ok'
+          render()
+          clickDelay = 0
+        } else {
+          if (shown === null) shown = nb
           state.status = 'ok'
           render()
         }
@@ -802,9 +811,14 @@ var turnCostCloseMs = 5000
 var costBubbleActive = false
 var scrollGapOn = false
 var scrollGapPx = 17
+function markSaveResult(ok) {
+  menuBox.classList.toggle('dafyv-save-error', !ok)
+}
 function saveConfig() {
+  var configOk = false
+  var posOk = false
   try {
-    saveSizeConfig({ scale: state.scale, sound: soundOn, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx })
+    configOk = saveSizeConfig({ scale: state.scale, sound: soundOn, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx })
     // 锚点位置记忆：记录相对边框的离边距离，窗口 resize 后保持（localStorage）。
     // v:2 = 净距离格式（剥离避让距离），v:1 旧格式含避让距离，恢复时废弃旧格式。
     var vp = viewport()
@@ -822,14 +836,22 @@ function saveConfig() {
     var vAnchor = topDist <= bottomDist ? 'top' : 'bottom'
     var vDist = Math.round(Math.min(topDist, bottomDist))
     if (vAnchor === 'bottom') vDist = Math.max(0, vDist - safeInsets.b)
-    localStorage.setItem('dafy-pos', JSON.stringify({
-      v: 2,
-      hAnchor: hAnchor,
-      hDist: hDist,
-      vAnchor: vAnchor,
-      vDist: vDist
-    }))
-  } catch (err) {}
+    try {
+      localStorage.setItem('dafy-pos', JSON.stringify({
+        v: 2,
+        hAnchor: hAnchor,
+        hDist: hDist,
+        vAnchor: vAnchor,
+        vDist: vDist
+      }))
+    } catch (err) {
+      posOk = false
+    }
+  } catch (err) {
+    configOk = false
+  }
+  markSaveResult(configOk && posOk)
+  return configOk && posOk
 }
 function setUsageMode(v) {
   usageMode = v === 'engine' ? 'engine' : 'ledger'
@@ -1248,7 +1270,13 @@ function endDrag(e, clickAllowed) {
   pressUp()
   root.classList.remove('dafyv-dragging')
   setWidgetCursor(isWhaleHit(e) ? 'grab' : '')
-  if (clickAllowed && !drag.moved && !drag.suppressed) { showBubble(); refresh(true); return }
+  if (clickAllowed && !drag.moved && !drag.suppressed) {
+    var alreadyOpen = bubbleShown
+    showBubble()
+    clickDelay = alreadyOpen ? 0 : 550
+    refresh(true)
+    return
+  }
   if (drag.suppressed) { settle(); return } // 长按开菜单：位置不动，直接收尾
   var dx = e.clientX - drag.startX
   var dy = e.clientY - drag.startY
@@ -1424,7 +1452,7 @@ if (rtTurn && typeof rtTurn.onTurn === 'function') {
     if (!turn || turn.amount === null || turn.amount === undefined) return
     state.todayUsage = turn.todayUsage !== undefined && turn.todayUsage !== null ? turn.todayUsage : state.todayUsage
     render()
-    showCostBubble(Number(turn.amount), !!turn.estimated)
+    showCostBubble(Number(turn.amount), !!turn.estimated, usageTokenCount(turn.tokens))
   })
 }
 // 跨标签页：其他标签页写入 dafy-* 账本时（storage 事件 → runtime.emitState）刷新本地显示
